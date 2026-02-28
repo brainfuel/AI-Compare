@@ -129,25 +129,31 @@ struct GeminiClient: GeminiServicing {
         }
 
         let text = parts.compactMap(\.text).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        let images = parts.compactMap { part -> GeneratedImage? in
-            if let inline = part.inlineData,
-               inline.mimeType.hasPrefix("image/"),
-               !inline.data.isEmpty {
-                return GeneratedImage(mimeType: inline.mimeType, base64Data: inline.data)
+        let generatedMedia = parts.compactMap { part -> GeneratedMedia? in
+            if let inline = part.inlineData, !inline.data.isEmpty {
+                return GeneratedMedia(
+                    kind: mediaKind(for: inline.mimeType),
+                    mimeType: inline.mimeType,
+                    base64Data: inline.data
+                )
             }
             if let file = part.fileData,
-               file.mimeType.hasPrefix("image/"),
+               !file.fileURI.isEmpty,
                let url = URL(string: file.fileURI) {
-                return GeneratedImage(mimeType: file.mimeType, remoteURL: url)
+                return GeneratedMedia(
+                    kind: mediaKind(for: file.mimeType),
+                    mimeType: file.mimeType,
+                    remoteURL: url
+                )
             }
             return nil
         }
 
-        if text.isEmpty && images.isEmpty {
+        if text.isEmpty && generatedMedia.isEmpty {
             throw GeminiError.emptyReply
         }
 
-        return ModelReply(text: text, generatedImages: images)
+        return ModelReply(text: text, generatedMedia: generatedMedia)
     }
 
     private func performWithRetry(request: URLRequest, maxAttempts: Int) async throws -> (Data, URLResponse) {
@@ -173,6 +179,17 @@ struct GeminiClient: GeminiServicing {
     private func shouldRetry(error: Error) -> Bool {
         guard let urlError = error as? URLError else { return false }
         return transientNetworkErrorCodes.contains(urlError.errorCode)
+    }
+
+    private func mediaKind(for mimeType: String) -> GeneratedMediaKind {
+        if mimeType.hasPrefix("image/") { return .image }
+        if mimeType.hasPrefix("audio/") { return .audio }
+        if mimeType.hasPrefix("video/") { return .video }
+        if mimeType == "application/pdf" { return .pdf }
+        if mimeType == "application/json" { return .json }
+        if mimeType == "text/csv" { return .csv }
+        if mimeType.hasPrefix("text/") { return .text }
+        return .file
     }
 }
 
