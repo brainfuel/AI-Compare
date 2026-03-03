@@ -11,7 +11,7 @@ final class PlaygroundViewModel: ObservableObject {
     @AppStorage("anthropic_model_id") private var anthropicModelID = "claude-3-5-sonnet-latest"
 
     @AppStorage("gemini_system_instruction") var systemInstruction = ""
-    @AppStorage("gemini_chat_history_v1") private var chatHistoryStore = ""
+    @AppStorage("gemini_chat_history_v1") private var legacyChatHistoryStore = ""
 
     @Published var messages: [ChatMessage] = []
     @Published var errorMessage: String?
@@ -25,6 +25,7 @@ final class PlaygroundViewModel: ObservableObject {
 
     private let serviceFactory: (AIProvider, String) -> GeminiServicing
     private let keychainStore: KeychainStore
+    private let conversationStoreURL: URL?
     private var didAutoLoadModels = false
     private var apiKeysByProvider: [AIProvider: String] = [:]
     private var pendingAPIKeyPersistTasks: [AIProvider: Task<Void, Never>] = [:]
@@ -50,6 +51,7 @@ final class PlaygroundViewModel: ObservableObject {
     ) {
         self.serviceFactory = serviceFactory
         self.keychainStore = keychainStore
+        self.conversationStoreURL = Self.makeConversationStoreURL()
         loadAPIKeysFromSecureStorage()
         let provider = AIProvider(rawValue: providerStore) ?? .gemini
         selectedProvider = provider
@@ -290,6 +292,23 @@ final class PlaygroundViewModel: ObservableObject {
         "api-key.\(provider.rawValue)"
     }
 
+    private static func makeConversationStoreURL() -> URL? {
+        do {
+            let fileManager = FileManager.default
+            let appSupport = try fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let appFolder = appSupport.appendingPathComponent("AI Tools", isDirectory: true)
+            try fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
+            return appFolder.appendingPathComponent("saved_conversations_v2.json")
+        } catch {
+            return nil
+        }
+    }
+
     private func persistCurrentModelID() {
         switch selectedProvider {
         case .gemini:
@@ -351,20 +370,41 @@ final class PlaygroundViewModel: ObservableObject {
     }
 
     private func loadSavedConversations() {
-        guard !chatHistoryStore.isEmpty,
-              let data = chatHistoryStore.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode([SavedConversation].self, from: data) else {
-            savedConversations = []
+        if let conversationStoreURL,
+           let data = try? Data(contentsOf: conversationStoreURL),
+           let decoded = try? JSONDecoder().decode([SavedConversation].self, from: data) {
+            savedConversations = decoded.sorted { $0.updatedAt > $1.updatedAt }
+            if !legacyChatHistoryStore.isEmpty {
+                legacyChatHistoryStore = ""
+            }
             return
         }
+
+        guard !legacyChatHistoryStore.isEmpty,
+              let data = legacyChatHistoryStore.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([SavedConversation].self, from: data) else {
+            savedConversations = []
+            if !legacyChatHistoryStore.isEmpty {
+                legacyChatHistoryStore = ""
+            }
+            return
+        }
+
         savedConversations = decoded.sorted { $0.updatedAt > $1.updatedAt }
+        persistSavedConversations()
+        legacyChatHistoryStore = ""
     }
 
     private func persistSavedConversations() {
-        guard let data = try? JSONEncoder().encode(savedConversations),
-              let string = String(data: data, encoding: .utf8) else {
+        guard let conversationStoreURL else {
+            errorMessage = "Unable to resolve conversation storage path."
             return
         }
-        chatHistoryStore = string
+        guard let data = try? JSONEncoder().encode(savedConversations) else { return }
+        do {
+            try data.write(to: conversationStoreURL, options: .atomic)
+        } catch {
+            errorMessage = "Failed to persist conversations: \(error.localizedDescription)"
+        }
     }
 }

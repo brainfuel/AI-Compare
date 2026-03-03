@@ -73,7 +73,8 @@ xcodebuild -project "AI Tools.xcodeproj" -scheme "AI Tools" -configuration Debug
 ## Data Storage
 
 - API keys are stored securely in the system Keychain.
-- Selected models, system instruction, and saved conversations are stored locally using `@AppStorage` (UserDefaults).
+- Selected provider/model/system-instruction settings are stored locally using `@AppStorage` (UserDefaults).
+- Saved conversations are stored as JSON under Application Support.
 - No server-side app backend is included in this project.
 
 ## Project Structure
