@@ -2,6 +2,10 @@
 
 A SwiftUI AI playground app for chatting with multiple providers from one interface.
 
+## Screenshot
+
+![AI Tools app screenshot](docs/images/screenshot1.png)
+
 ## Overview
 
 AI Tools lets you:
@@ -90,4 +94,4 @@ xcodebuild -project "AI Tools.xcodeproj" -scheme "AI Tools" -configuration Debug
 
 ## License
 
-No license file is currently included.
+[MIT](LICENSE)
