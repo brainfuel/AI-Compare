@@ -16,8 +16,7 @@ final class PlaygroundViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var selectedProvider: AIProvider = .gemini
-    @Published var modelID: String = ModelPreset.geminiFlash.modelID
-    @Published var selectedPreset: ModelPreset = .geminiFlash
+    @Published var modelID: String = "gemini-2.5-flash"
     @Published var availableModels: [String] = []
     @Published var savedConversations: [SavedConversation] = []
     @Published var selectedConversationID: UUID?
@@ -103,22 +102,16 @@ final class PlaygroundViewModel: ObservableObject {
         selectedProvider = provider
         providerStore = provider.rawValue
         modelID = providerModelID(provider)
-        selectedPreset = ModelPreset(rawValue: modelID) ?? .custom
         availableModels = []
         errorMessage = nil
         await autoLoadModelsIfPossible()
     }
 
-    func applyPreset(_ preset: ModelPreset) {
-        if preset != .custom {
-            modelID = preset.modelID
-            persistCurrentModelID()
+    func selectModel(_ model: String) {
+        if modelID != model {
+            modelID = model
         }
-    }
-
-    func modelIDDidChange() {
         persistCurrentModelID()
-        selectedPreset = ModelPreset(rawValue: modelID) ?? .custom
     }
 
     func clearMessages() {

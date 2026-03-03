@@ -120,20 +120,7 @@ struct ContentView: View {
                     }
                 }
 
-                if viewModel.selectedProvider == .gemini {
-                    Picker("Preset", selection: $viewModel.selectedPreset) {
-                        ForEach(ModelPreset.allCases) { preset in
-                            Text(preset.displayName).tag(preset)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .onChange(of: viewModel.selectedPreset) { _, newValue in
-                        viewModel.applyPreset(newValue)
-                    }
-                }
-
                 HStack {
-                    TextField("Model ID", text: modelIDBinding)
                     Button("Load Models") {
                         Task {
                             await viewModel.refreshModels()
@@ -141,10 +128,16 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(viewModel.isLoading || viewModel.currentAPIKey.isEmpty || !viewModel.canLoadModels)
+
+                    if viewModel.availableModels.isEmpty {
+                        Text("Load models to choose one")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if !viewModel.availableModels.isEmpty {
-                    Picker("Available Models", selection: $viewModel.modelID) {
+                    Picker("Available Models", selection: modelSelectionBinding) {
                         ForEach(viewModel.availableModels, id: \.self) { model in
                             Text(model).tag(model)
                         }
@@ -328,13 +321,10 @@ struct ContentView: View {
         )
     }
 
-    private var modelIDBinding: Binding<String> {
+    private var modelSelectionBinding: Binding<String> {
         Binding(
             get: { viewModel.modelID },
-            set: {
-                viewModel.modelID = $0
-                viewModel.modelIDDidChange()
-            }
+            set: { viewModel.selectModel($0) }
         )
     }
 
