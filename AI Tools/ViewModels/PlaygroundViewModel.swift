@@ -44,11 +44,14 @@ final class PlaygroundViewModel: ObservableObject {
                 return AnthropicClient(apiKey: key)
             }
         },
-        keychainStore: KeychainStore = KeychainStore()
+        keychainStore: KeychainStore = KeychainStore(),
+        conversationStoreFactory: (() -> ConversationStore?)? = nil
         ) {
         self.serviceFactory = serviceFactory
         self.keychainStore = keychainStore
-        if let mediaStoreDirectoryURL = Self.makeMediaStoreDirectoryURL() {
+        if let conversationStoreFactory {
+            self.conversationStore = conversationStoreFactory()
+        } else if let mediaStoreDirectoryURL = Self.makeMediaStoreDirectoryURL() {
             self.conversationStore = ConversationStore(
                 mediaStoreDirectoryURL: mediaStoreDirectoryURL
             )
