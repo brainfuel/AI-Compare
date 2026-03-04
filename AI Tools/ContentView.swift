@@ -22,13 +22,6 @@ struct ContentView: View {
             }
             .padding()
             .navigationTitle("AI Playground")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Reset Chat") {
-                        viewModel.clearMessages()
-                    }
-                }
-            }
         }
 #if os(macOS)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280)
@@ -40,19 +33,28 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button("New Chat") {
+            HStack(spacing: 0) {
+                Button {
                     viewModel.startNewChat()
+                } label: {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("New Chat")
                 .buttonStyle(.borderedProminent)
 
-                Button("Delete") {
+
+                Spacer()
+                
+                Button(role: .destructive) {
                     viewModel.deleteSelectedConversation()
+                } label: {
+                    Image(systemName: "trash")
                 }
+                .accessibilityLabel("Delete Chat")
                 .buttonStyle(.bordered)
                 .disabled(viewModel.selectedConversationID == nil)
 
-                Spacer()
+             
             }
 
             TextField("Search History", text: $historySearch)
@@ -66,9 +68,13 @@ struct ContentView: View {
                         Image(systemName: "plus.bubble")
                         Text("Current Chat")
                             .lineLimit(1)
+                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
                 .listRowBackground(viewModel.selectedConversationID == nil ? Color.accentColor.opacity(0.14) : Color.clear)
 
@@ -84,13 +90,16 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
                     .listRowBackground(viewModel.selectedConversationID == conversation.id ? Color.accentColor.opacity(0.14) : Color.clear)
                 }
             }
             .listStyle(.sidebar)
+            .animation(.easeInOut(duration: 0.2), value: viewModel.savedConversations.map(\.id))
         }
     }
 
