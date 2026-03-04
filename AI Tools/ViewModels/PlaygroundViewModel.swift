@@ -135,6 +135,12 @@ final class PlaygroundViewModel: ObservableObject {
             return
         }
 
+        let providerChanged = selectedProvider != conversation.provider
+        selectedProvider = conversation.provider
+        providerStore = conversation.provider.rawValue
+        if providerChanged {
+            availableModels = []
+        }
         modelID = conversation.modelID
         persistCurrentModelID()
         messages = conversation.messages
@@ -368,6 +374,7 @@ final class PlaygroundViewModel: ObservableObject {
 
         let conversation = SavedConversation(
             id: UUID(),
+            provider: selectedProvider,
             title: inferredConversationTitle(),
             updatedAt: Date(),
             modelID: modelID,
@@ -383,6 +390,7 @@ final class PlaygroundViewModel: ObservableObject {
     private func updateConversation(id: UUID) {
         guard let index = savedConversations.firstIndex(where: { $0.id == id }) else { return }
         savedConversations[index].updatedAt = Date()
+        savedConversations[index].provider = selectedProvider
         savedConversations[index].modelID = modelID
         savedConversations[index].messages = messages
         savedConversations[index].title = inferredConversationTitle(fallback: savedConversations[index].title)
