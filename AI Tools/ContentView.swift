@@ -21,7 +21,7 @@ struct ContentView: View {
                 composerSection
             }
             .padding()
-            .navigationTitle("AI Playground")
+            .navigationTitle("AI Tools")
         }
 #if os(macOS)
         .navigationSplitViewColumnWidth(min: 220, ideal: 280)
