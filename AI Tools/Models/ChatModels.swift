@@ -167,6 +167,7 @@ extension ChatMessage: Codable {
 
 struct SavedConversation: Identifiable, Codable {
     var id: UUID
+    var provider: AIProvider
     var title: String
     var updatedAt: Date
     var modelID: String
@@ -175,6 +176,52 @@ struct SavedConversation: Identifiable, Codable {
     var searchBlob: String {
         let body = messages.map(\.text).joined(separator: "\n")
         return "\(title)\n\(body)"
+    }
+
+    init(
+        id: UUID,
+        provider: AIProvider,
+        title: String,
+        updatedAt: Date,
+        modelID: String,
+        messages: [ChatMessage]
+    ) {
+        self.id = id
+        self.provider = provider
+        self.title = title
+        self.updatedAt = updatedAt
+        self.modelID = modelID
+        self.messages = messages
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case provider
+        case title
+        case updatedAt
+        case modelID
+        case messages
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        modelID = try container.decode(String.self, forKey: .modelID)
+        messages = try container.decode([ChatMessage].self, forKey: .messages)
+        provider = try container.decodeIfPresent(AIProvider.self, forKey: .provider)
+            ?? AIProvider.inferredProvider(for: modelID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(modelID, forKey: .modelID)
+        try container.encode(messages, forKey: .messages)
     }
 }
 
