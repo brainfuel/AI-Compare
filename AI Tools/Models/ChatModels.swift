@@ -30,22 +30,6 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-extension AIProvider {
-    static func inferredProvider(for modelID: String) -> AIProvider {
-        let value = modelID.lowercased()
-
-        if value.hasPrefix("gpt-") || value.hasPrefix("o1") || value.hasPrefix("o3") || value.hasPrefix("o4") || value.hasPrefix("dall-e") || value.hasPrefix("chatgpt-") {
-            return .chatGPT
-        }
-
-        if value.hasPrefix("claude") {
-            return .anthropic
-        }
-
-        return .gemini
-    }
-}
-
 enum MessageRole: String, Codable {
     case user
     case assistant
@@ -206,12 +190,11 @@ struct SavedConversation: Identifiable, Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
+        provider = try container.decode(AIProvider.self, forKey: .provider)
         title = try container.decode(String.self, forKey: .title)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         modelID = try container.decode(String.self, forKey: .modelID)
         messages = try container.decode([ChatMessage].self, forKey: .messages)
-        provider = try container.decodeIfPresent(AIProvider.self, forKey: .provider)
-            ?? AIProvider.inferredProvider(for: modelID)
     }
 
     func encode(to encoder: Encoder) throws {

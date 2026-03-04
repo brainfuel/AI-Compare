@@ -91,16 +91,15 @@ final class PlaygroundViewModel: ObservableObject {
     func loadOnLaunchIfNeeded() async {
         guard !didAutoLoadModels else { return }
         didAutoLoadModels = true
-        await autoLoadModelsIfPossible()
+        await prefetchModelsOnLaunch()
     }
 
     func selectProvider(_ provider: AIProvider) async {
         selectedProvider = provider
         providerStore = provider.rawValue
         modelID = providerModelID(provider)
-        availableModels = []
+        availableModels = cachedModels(for: provider, including: modelID)
         errorMessage = nil
-        await autoLoadModelsIfPossible()
     }
 
     func selectModel(_ model: String) {
@@ -298,7 +297,11 @@ final class PlaygroundViewModel: ObservableObject {
     }
 
     private func persistCurrentModelID() {
-        switch selectedProvider {
+        persistModelID(modelID, for: selectedProvider)
+    }
+
+    private func persistModelID(_ modelID: String, for provider: AIProvider) {
+        switch provider {
         case .gemini:
             geminiModelID = modelID
         case .chatGPT:
@@ -396,5 +399,81 @@ final class PlaygroundViewModel: ObservableObject {
                 self.pendingConversationSaveTask = nil
             }
         }
+    }
+
+    private func supportsModelLoading(_ provider: AIProvider) -> Bool {
+        provider == .gemini || provider == .chatGPT || provider == .anthropic
+    }
+
+    private func fetchModels(for provider: AIProvider, reportErrorsForSelectedProvider: Bool) async {
+        guard supportsModelLoading(provider) else { return }
+        guard let apiKey = apiKeysByProvider[provider], !apiKey.isEmpty else { return }
+
+        do {
+            let fetchedModels = try await serviceFactory(provider, apiKey).listGenerateContentModels()
+            updateModelCache(fetchedModels, for: provider)
+
+            let currentProviderModelID = providerModelID(provider)
+            if !fetchedModels.contains(currentProviderModelID), let first = fetchedModels.first {
+                persistModelID(first, for: provider)
+                if provider == selectedProvider {
+                    modelID = first
+                }
+            }
+
+            if provider == selectedProvider {
+                availableModels = cachedModels(for: provider, including: modelID)
+            }
+        } catch {
+            if reportErrorsForSelectedProvider && provider == selectedProvider {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadModelCachesFromStorage() {
+        availableModelsByProvider[.gemini] = decodeModels(geminiModelsCache)
+        availableModelsByProvider[.chatGPT] = decodeModels(openAIModelsCache)
+        availableModelsByProvider[.anthropic] = decodeModels(anthropicModelsCache)
+    }
+
+    private func updateModelCache(_ models: [String], for provider: AIProvider) {
+        var seen = Set<String>()
+        let uniqueModels = models.filter { seen.insert($0).inserted }
+        availableModelsByProvider[provider] = uniqueModels
+
+        let encoded = encodeModels(uniqueModels)
+        switch provider {
+        case .gemini:
+            geminiModelsCache = encoded
+        case .chatGPT:
+            openAIModelsCache = encoded
+        case .anthropic:
+            anthropicModelsCache = encoded
+        }
+    }
+
+    private func cachedModels(for provider: AIProvider, including model: String? = nil) -> [String] {
+        var models = availableModelsByProvider[provider] ?? []
+        if let model, !model.isEmpty, !models.contains(model) {
+            models.insert(model, at: 0)
+        }
+        return models
+    }
+
+    private func decodeModels(_ raw: String) -> [String] {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+
+    private func encodeModels(_ models: [String]) -> String {
+        guard let data = try? JSONEncoder().encode(models),
+              let raw = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return raw
     }
 }

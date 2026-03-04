@@ -4,13 +4,11 @@ import SwiftData
 @MainActor
 final class ConversationStore {
     private let mediaStoreDirectoryURL: URL
-    private let legacyStoreURL: URL
     private let modelContainer: ModelContainer
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
-    init?(legacyStoreURL: URL, mediaStoreDirectoryURL: URL) {
-        self.legacyStoreURL = legacyStoreURL
+    init?(mediaStoreDirectoryURL: URL) {
         self.mediaStoreDirectoryURL = mediaStoreDirectoryURL
 
         do {
@@ -22,11 +20,7 @@ final class ConversationStore {
 
     func loadConversations() throws -> [SavedConversation] {
         let context = modelContainer.mainContext
-        var records = try context.fetch(fetchDescriptor)
-        if records.isEmpty {
-            try migrateLegacyJSONIfNeeded(context: context)
-            records = try context.fetch(fetchDescriptor)
-        }
+        let records = try context.fetch(fetchDescriptor)
 
         var didChange = false
         var conversations: [SavedConversation] = []
@@ -35,7 +29,7 @@ final class ConversationStore {
         for record in records {
             guard let decoded = decodeMessages(from: record.messagesData) else { continue }
             let normalizedMessages = normalizeMessages(decoded)
-            let provider = AIProvider(rawValue: record.providerRawValue) ?? AIProvider.inferredProvider(for: record.modelID)
+            guard let provider = AIProvider(rawValue: record.providerRawValue) else { continue }
             let conversation = SavedConversation(
                 id: record.id,
                 provider: provider,
@@ -103,32 +97,6 @@ final class ConversationStore {
         FetchDescriptor<ConversationRecord>(
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
-    }
-
-    private func migrateLegacyJSONIfNeeded(context: ModelContext) throws {
-        guard FileManager.default.fileExists(atPath: legacyStoreURL.path) else { return }
-        guard let data = try? Data(contentsOf: legacyStoreURL),
-              let decoded = try? JSONDecoder().decode([SavedConversation].self, from: data),
-              !decoded.isEmpty else {
-            return
-        }
-
-        let normalized = normalizeConversations(decoded).conversations
-        for conversation in normalized {
-            let record = ConversationRecord(
-                id: conversation.id,
-                providerRawValue: conversation.provider.rawValue,
-                title: conversation.title,
-                updatedAt: conversation.updatedAt,
-                modelID: conversation.modelID,
-                searchBlob: conversation.searchBlob,
-                messagesData: try encodeMessages(conversation.messages)
-            )
-            context.insert(record)
-        }
-        if context.hasChanges {
-            try context.save()
-        }
     }
 
     private func apply(conversation: SavedConversation, to record: ConversationRecord) {
