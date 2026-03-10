@@ -987,6 +987,42 @@ private final class CompareViewModel: ObservableObject {
         !(apiKeysByProvider[provider] ?? "").isEmpty
     }
 
+    func canContinueInSingle(for provider: AIProvider) -> Bool {
+        let selected = selectedModel(for: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty else { return false }
+        return !singleChatMessages(for: provider).isEmpty
+    }
+
+    func makeSingleConversation(for provider: AIProvider) -> SavedConversation? {
+        let messages = singleChatMessages(for: provider)
+        guard !messages.isEmpty else { return nil }
+
+        let selected = selectedModel(for: provider).trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackModel = runs
+            .sorted { $0.createdAt < $1.createdAt }
+            .compactMap { run -> String? in
+                guard let result = run.results[provider] else { return nil }
+                let model = result.modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !model.isEmpty else { return nil }
+                return model
+            }
+            .last
+        let modelID = !selected.isEmpty ? selected : (fallbackModel ?? "")
+        guard !modelID.isEmpty else {
+            return nil
+        }
+
+        let titleSeed = messages.first(where: { $0.role == .user })?.text ?? "\(provider.displayName) Thread"
+        return SavedConversation(
+            id: UUID(),
+            provider: provider,
+            title: makeTitle(from: titleSeed),
+            updatedAt: Date(),
+            modelID: modelID,
+            messages: messages
+        )
+    }
+
     func refreshModels(for provider: AIProvider) async {
         await fetchModels(for: provider, reportErrors: true)
     }
@@ -1253,6 +1289,50 @@ private final class CompareViewModel: ObservableObject {
             return []
         }
         return decoded
+    }
+
+    private func singleChatMessages(for provider: AIProvider) -> [ChatMessage] {
+        let orderedRuns = runs.sorted { $0.createdAt < $1.createdAt }
+        var messages: [ChatMessage] = []
+
+        for run in orderedRuns {
+            guard let result = run.results[provider], result.state != .skipped else {
+                continue
+            }
+
+            messages.append(
+                ChatMessage(
+                    role: .user,
+                    text: run.prompt,
+                    createdAt: run.createdAt,
+                    attachments: run.attachments
+                )
+            )
+
+            let responseText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasAssistantPayload = !responseText.isEmpty ||
+                !result.generatedMedia.isEmpty ||
+                result.inputTokens > 0 ||
+                result.outputTokens > 0
+            guard hasAssistantPayload else {
+                continue
+            }
+
+            messages.append(
+                ChatMessage(
+                    role: .assistant,
+                    text: responseText,
+                    createdAt: run.createdAt.addingTimeInterval(0.001),
+                    attachments: [],
+                    generatedMedia: result.generatedMedia,
+                    inputTokens: result.inputTokens,
+                    outputTokens: result.outputTokens,
+                    modelID: result.modelID.isEmpty ? nil : result.modelID
+                )
+            )
+        }
+
+        return messages
     }
 
     private func upsertCurrentConversation() {
