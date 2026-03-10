@@ -17,7 +17,7 @@ A SwiftUI AI playground app for chatting with multiple providers from one interf
 
 AI Tools lets you:
 
-- switch between Gemini, OpenAI, and Anthropic
+- switch between Gemini, OpenAI, Anthropic, and Grok
 - run in `Single` mode (normal chat) or `Compare` mode (same prompt across providers)
 - load and cache available models per provider
 - keep local history with searchable threads
@@ -46,6 +46,7 @@ AI Tools lets you:
 | Gemini | Yes | Yes | Yes | Yes |
 | OpenAI | Yes | Yes | Images supported (non-image files skipped) | Image generation models supported |
 | Anthropic | Yes | Yes | Images supported (non-image files skipped) | Text only |
+| Grok | Yes | Yes | Images supported (non-image files skipped) | Text only |
 
 Notes:
 
@@ -117,13 +118,14 @@ xcodebuild -project "AI Tools.xcodeproj" -scheme "AI Tools" -destination "platfo
 - [AI Tools/Networking/GeminiClient.swift](AI%20Tools/Networking/GeminiClient.swift): Gemini API integration
 - [AI Tools/Networking/OpenAIClient.swift](AI%20Tools/Networking/OpenAIClient.swift): OpenAI API integration
 - [AI Tools/Networking/AnthropicClient.swift](AI%20Tools/Networking/AnthropicClient.swift): Anthropic API integration
+- [AI Tools/Networking/GrokClient.swift](AI%20Tools/Networking/GrokClient.swift): xAI Grok API integration
 - [AI Tools/Storage/ConversationStore.swift](AI%20Tools/Storage/ConversationStore.swift): SwiftData conversation persistence
 - [AI Tools/Views/ChatRenderingViews.swift](AI%20Tools/Views/ChatRenderingViews.swift): Message/media rendering components
 - [AI ToolsTests/PlaygroundViewModelTests.swift](AI%20ToolsTests/PlaygroundViewModelTests.swift): Model cache and prefetch unit tests
 
 ## Known Limitations
 
-- OpenAI and Anthropic currently send image attachments only; non-image attachments are skipped.
+- OpenAI, Anthropic, and Grok currently send image attachments only; non-image attachments are skipped.
 - Gemini and Anthropic currently return final responses (not token-by-token UI streaming).
 
 ## License
