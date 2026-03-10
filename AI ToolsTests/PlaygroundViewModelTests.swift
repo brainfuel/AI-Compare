@@ -9,9 +9,11 @@ final class PlaygroundViewModelTests: XCTestCase {
         "gemini_model_id",
         "openai_model_id",
         "anthropic_model_id",
+        "grok_model_id",
         "gemini_models_cache_v1",
         "openai_models_cache_v1",
         "anthropic_models_cache_v1",
+        "grok_models_cache_v1",
         "gemini_system_instruction"
     ]
 

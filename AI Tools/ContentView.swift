@@ -73,7 +73,7 @@ struct ContentView: View {
         }
         .onChange(of: workspaceMode) { _, mode in
             guard mode == .compare else { return }
-            compareViewModel.reloadFromStorage()
+            compareViewModel.reloadFromStorage(includeSecureStorage: true)
         }
     }
 
@@ -815,9 +815,11 @@ private final class CompareViewModel: ObservableObject {
     @AppStorage("gemini_model_id") private var geminiModelID = "gemini-2.5-flash"
     @AppStorage("openai_model_id") private var openAIModelID = "gpt-4.1-mini"
     @AppStorage("anthropic_model_id") private var anthropicModelID = "claude-3-5-sonnet-latest"
+    @AppStorage("grok_model_id") private var grokModelID = "grok-3-mini"
     @AppStorage("gemini_models_cache_v1") private var geminiModelsCache = ""
     @AppStorage("openai_models_cache_v1") private var openAIModelsCache = ""
     @AppStorage("anthropic_models_cache_v1") private var anthropicModelsCache = ""
+    @AppStorage("grok_models_cache_v1") private var grokModelsCache = ""
     @AppStorage("compare_conversations_v1") private var compareConversationsStore = ""
 
     @Published var savedConversations: [CompareConversation] = []
@@ -844,6 +846,8 @@ private final class CompareViewModel: ObservableObject {
                 return OpenAIClient(apiKey: key)
             case .anthropic:
                 return AnthropicClient(apiKey: key)
+            case .grok:
+                return GrokClient(apiKey: key)
             }
         },
         keychainStore: KeychainStore = KeychainStore()
@@ -851,7 +855,7 @@ private final class CompareViewModel: ObservableObject {
         self.serviceFactory = serviceFactory
         self.keychainStore = keychainStore
         loadSavedConversations()
-        reloadFromStorage()
+        reloadFromStorage(includeSecureStorage: true)
     }
 
     var composerStatusLabel: String {
@@ -878,8 +882,10 @@ private final class CompareViewModel: ObservableObject {
         }
     }
 
-    func reloadFromStorage() {
-        loadAPIKeysFromSecureStorage()
+    func reloadFromStorage(includeSecureStorage: Bool = false) {
+        if includeSecureStorage {
+            loadAPIKeysFromSecureStorage()
+        }
         loadSelectedModelsFromStorage()
         loadModelCachesFromStorage()
         if let selectedConversationID {
@@ -1181,6 +1187,7 @@ private final class CompareViewModel: ObservableObject {
         selectedModelsByProvider[.gemini] = geminiModelID
         selectedModelsByProvider[.chatGPT] = openAIModelID
         selectedModelsByProvider[.anthropic] = anthropicModelID
+        selectedModelsByProvider[.grok] = grokModelID
     }
 
     private func persistSelectedModel(_ model: String, for provider: AIProvider) {
@@ -1191,6 +1198,8 @@ private final class CompareViewModel: ObservableObject {
             openAIModelID = model
         case .anthropic:
             anthropicModelID = model
+        case .grok:
+            grokModelID = model
         }
     }
 
@@ -1198,6 +1207,7 @@ private final class CompareViewModel: ObservableObject {
         availableModelsByProvider[.gemini] = decodeModelCache(geminiModelsCache)
         availableModelsByProvider[.chatGPT] = decodeModelCache(openAIModelsCache)
         availableModelsByProvider[.anthropic] = decodeModelCache(anthropicModelsCache)
+        availableModelsByProvider[.grok] = decodeModelCache(grokModelsCache)
     }
 
     private func persistModelCache(_ models: [String], for provider: AIProvider) {
@@ -1210,6 +1220,8 @@ private final class CompareViewModel: ObservableObject {
             openAIModelsCache = encoded
         case .anthropic:
             anthropicModelsCache = encoded
+        case .grok:
+            grokModelsCache = encoded
         }
     }
 

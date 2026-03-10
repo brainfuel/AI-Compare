@@ -4,6 +4,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
     case gemini
     case chatGPT
     case anthropic
+    case grok
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum AIProvider: String, CaseIterable, Identifiable, Codable {
         case .gemini: return "Gemini"
         case .chatGPT: return "ChatGPT"
         case .anthropic: return "Anthropic"
+        case .grok: return "Grok"
         }
     }
 

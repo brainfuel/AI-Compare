@@ -18,9 +18,11 @@ final class PlaygroundViewModel: ObservableObject {
     @AppStorage("gemini_model_id") private var geminiModelID = "gemini-2.5-flash"
     @AppStorage("openai_model_id") private var openAIModelID = "gpt-4.1-mini"
     @AppStorage("anthropic_model_id") private var anthropicModelID = "claude-3-5-sonnet-latest"
+    @AppStorage("grok_model_id") private var grokModelID = "grok-3-mini"
     @AppStorage("gemini_models_cache_v1") private var geminiModelsCache = ""
     @AppStorage("openai_models_cache_v1") private var openAIModelsCache = ""
     @AppStorage("anthropic_models_cache_v1") private var anthropicModelsCache = ""
+    @AppStorage("grok_models_cache_v1") private var grokModelsCache = ""
 
     @AppStorage("gemini_system_instruction") var systemInstruction = ""
 
@@ -53,6 +55,8 @@ final class PlaygroundViewModel: ObservableObject {
                 return OpenAIClient(apiKey: key)
             case .anthropic:
                 return AnthropicClient(apiKey: key)
+            case .grok:
+                return GrokClient(apiKey: key)
             }
         },
         keychainStore: KeychainStore = KeychainStore(),
@@ -95,7 +99,7 @@ final class PlaygroundViewModel: ObservableObject {
     }
 
     var canLoadModels: Bool {
-        selectedProvider == .gemini || selectedProvider == .chatGPT || selectedProvider == .anthropic
+        supportsModelLoading(selectedProvider)
     }
 
     func updateCurrentAPIKey(_ value: String) {
@@ -371,6 +375,8 @@ final class PlaygroundViewModel: ObservableObject {
             openAIModelID = modelID
         case .anthropic:
             anthropicModelID = modelID
+        case .grok:
+            grokModelID = modelID
         }
     }
 
@@ -382,6 +388,8 @@ final class PlaygroundViewModel: ObservableObject {
             return openAIModelID
         case .anthropic:
             return anthropicModelID
+        case .grok:
+            return grokModelID
         }
     }
 
@@ -532,7 +540,7 @@ final class PlaygroundViewModel: ObservableObject {
     }
 
     private func supportsModelLoading(_ provider: AIProvider) -> Bool {
-        provider == .gemini || provider == .chatGPT || provider == .anthropic
+        provider.isImplemented
     }
 
     private func fetchModels(for provider: AIProvider, reportErrorsForSelectedProvider: Bool) async {
@@ -565,6 +573,7 @@ final class PlaygroundViewModel: ObservableObject {
         availableModelsByProvider[.gemini] = decodeModels(geminiModelsCache)
         availableModelsByProvider[.chatGPT] = decodeModels(openAIModelsCache)
         availableModelsByProvider[.anthropic] = decodeModels(anthropicModelsCache)
+        availableModelsByProvider[.grok] = decodeModels(grokModelsCache)
     }
 
     private func updateModelCache(_ models: [String], for provider: AIProvider) {
@@ -580,6 +589,8 @@ final class PlaygroundViewModel: ObservableObject {
             openAIModelsCache = encoded
         case .anthropic:
             anthropicModelsCache = encoded
+        case .grok:
+            grokModelsCache = encoded
         }
     }
 
