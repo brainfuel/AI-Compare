@@ -937,49 +937,31 @@ private extension ContentView {
         }
     }
 
-    private func sendMessage() {
+    func sendMessage() {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
-        let attachments = pendingAttachments
+        guard !text.isEmpty || !viewModel.pendingAttachments.isEmpty else { return }
         prompt = ""
-        pendingAttachments = []
         inputFocused = false
         Task {
-            await viewModel.send(text: text, attachments: attachments)
+            await viewModel.send(text: text)
         }
     }
 
-    private var apiKeyBinding: Binding<String> {
+    var apiKeyBinding: Binding<String> {
         Binding(
             get: { viewModel.currentAPIKey },
             set: { viewModel.updateCurrentAPIKey($0) }
         )
     }
 
-    private var modelSelectionBinding: Binding<String> {
+    var modelSelectionBinding: Binding<String> {
         Binding(
             get: { viewModel.modelID },
             set: { viewModel.selectModel($0) }
         )
     }
 
-    private func handleImportResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .failure(let error):
-            viewModel.errorMessage = "Attachment import failed: \(error.localizedDescription)"
-        case .success(let urls):
-            for url in urls {
-                do {
-                    let attachment = try PendingAttachment.fromFileURL(url)
-                    pendingAttachments.append(attachment)
-                } catch {
-                    viewModel.errorMessage = "Failed to load \(url.lastPathComponent): \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func copyToClipboard(_ value: String) {
+    func copyToClipboard(_ value: String) {
 #if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
