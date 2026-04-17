@@ -197,7 +197,7 @@ private struct AssistantGeneratedImageView: View {
             Image(nsImage: nsImage)
                 .resizable()
                 .scaledToFit()
-                .background(Color.secondary.opacity(0.08))
+                .background(AppTheme.surfaceSecondary)
         } else if let remoteURL = media.remoteURL {
             AsyncImage(url: remoteURL) { phase in
                 switch phase {
@@ -221,7 +221,7 @@ private struct AssistantGeneratedImageView: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .scaledToFit()
-                .background(Color.secondary.opacity(0.08))
+                .background(AppTheme.surfaceSecondary)
         } else if let remoteURL = media.remoteURL {
             AsyncImage(url: remoteURL) { phase in
                 switch phase {
@@ -368,7 +368,7 @@ private struct AssistantTextView: View {
                 }
                 .frame(minHeight: 120)
                 .padding(8)
-                .background(Color.black.opacity(0.06))
+                .background(AppTheme.surfaceGrouped)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if let remoteURL = media.remoteURL {
                 Link("Open Text File", destination: remoteURL)
@@ -399,7 +399,7 @@ private struct AssistantJSONView: View {
                 }
                 .frame(minHeight: 140)
                 .padding(8)
-                .background(Color.black.opacity(0.06))
+                .background(AppTheme.surfaceGrouped)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if let remoteURL = media.remoteURL {
                 Link("Open JSON File", destination: remoteURL)
@@ -430,7 +430,7 @@ private struct AssistantCSVView: View {
                 }
                 .frame(minHeight: 120)
                 .padding(8)
-                .background(Color.black.opacity(0.06))
+                .background(AppTheme.surfaceGrouped)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if let remoteURL = media.remoteURL {
                 Link("Open CSV File", destination: remoteURL)
@@ -451,7 +451,7 @@ private struct AssistantFileFallbackView: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 10)
-            .fill(Color.secondary.opacity(0.12))
+            .fill(AppTheme.surfaceSecondary)
             .overlay(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Attachment returned")
@@ -591,7 +591,7 @@ struct AttachmentPreview: View {
     private var fallback: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.2))
+                .fill(AppTheme.surfaceSecondary)
             Image(systemName: attachment.mimeType.hasPrefix("image/") ? "photo" : "doc")
                 .font(.title3)
                 .foregroundStyle(.secondary)

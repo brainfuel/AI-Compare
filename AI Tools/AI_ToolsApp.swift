@@ -12,6 +12,11 @@ struct AI_ToolsApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(AppTheme.brandTint)
+                .background(AppTheme.canvasBackground)
         }
+#if os(macOS)
+        .defaultSize(width: 1320, height: 860)
+#endif
     }
 }
