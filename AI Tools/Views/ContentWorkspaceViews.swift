@@ -26,10 +26,12 @@ struct ConversationSidebarView: View {
         VStack(spacing: 8) {
             HStack(spacing: 0) {
                 Button {
-                    if workspaceMode == .single {
-                        viewModel.startNewChat()
-                    } else {
-                        compareViewModel.startNewThread()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if workspaceMode == .single {
+                            viewModel.startNewChat()
+                        } else {
+                            compareViewModel.startNewThread()
+                        }
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -110,7 +112,11 @@ struct ConversationSidebarView: View {
         selectAction: @escaping (UUID) -> Void
     ) -> some View {
         if selectedConversationID == nil {
-            Button(action: newRowAction) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    newRowAction()
+                }
+            } label: {
                 HStack {
                     Image(systemName: newRowIcon)
                     Text(newRowTitle)
@@ -124,11 +130,14 @@ struct ConversationSidebarView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 4)
             .listRowBackground(AppTheme.brandTint.opacity(0.14))
+            .transition(.opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.98, anchor: .top)))
         }
 
         ForEach(conversations) { conversation in
             Button {
-                selectAction(conversation.id)
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectAction(conversation.id)
+                }
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(conversation.title)
