@@ -98,6 +98,9 @@ Secrets.swift
 GoogleService-Info.plist
 *.local.xcconfig
 
+# Claude Code local settings (machine-specific, may contain paths/keys)
+.claude/settings.local.json
+
 # Previews (optional)
 **/PreviewAssets.xcassets/
 

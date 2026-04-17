@@ -57,13 +57,7 @@ final class PlaygroundViewModel: ObservableObject {
         self.serviceFactory = serviceFactory
         self.nowProvider = nowProvider
 
-        if let conversationStoreFactory {
-            self.conversationStore = conversationStoreFactory()
-        } else if let mediaURL = Self.makeMediaStoreDirectoryURL() {
-            self.conversationStore = ConversationStore(mediaStoreDirectoryURL: mediaURL)
-        } else {
-            self.conversationStore = nil
-        }
+        self.conversationStore = conversationStoreFactory?()
 
         resolvedAPIKeyManager.loadFromSecureStorage()
         resolvedAPIKeyManager.onPersistError = { [weak self] message in
@@ -459,21 +453,4 @@ final class PlaygroundViewModel: ObservableObject {
                                       outputTokens: outputTokens, estimatedCost: estimatedCost)
     }
 
-    // MARK: - Private: storage directory
-
-    private static func makeMediaStoreDirectoryURL() -> URL? {
-        do {
-            let appSupport = try FileManager.default.url(
-                for: .applicationSupportDirectory, in: .userDomainMask,
-                appropriateFor: nil, create: true
-            )
-            let folder = appSupport
-                .appendingPathComponent("AI Tools", isDirectory: true)
-                .appendingPathComponent("media", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            return folder
-        } catch {
-            return nil
-        }
-    }
 }

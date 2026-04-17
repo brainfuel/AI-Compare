@@ -4,8 +4,6 @@ import Combine
 
 @MainActor
 final class CompareViewModel: ObservableObject {
-    @AppStorage("compare_conversations_v1") private var compareConversationsStore = ""
-
     @Published var savedConversations: [CompareConversation] = []
     @Published var selectedConversationID: UUID?
     @Published var runs: [CompareRun] = []
@@ -22,11 +20,14 @@ final class CompareViewModel: ObservableObject {
     private let apiKeyManager: APIKeyManager
     private let modelService: ModelService
     private let serviceFactory: (AIProvider, String) -> GeminiServicing
+    private let conversationStore: CompareConversationStore?
+    private var pendingConversationSaveTask: Task<Void, Never>?
     private var didAutoLoadModels = false
 
     init(
         apiKeyManager: APIKeyManager? = nil,
         modelService: ModelService? = nil,
+        conversationStore: CompareConversationStore? = nil,
         serviceFactory: @escaping (AIProvider, String) -> GeminiServicing = { provider, key in
             switch provider {
             case .gemini:    return GeminiClient(apiKey: key)
@@ -37,13 +38,19 @@ final class CompareViewModel: ObservableObject {
         }
     ) {
         let resolvedAPIKeyManager = apiKeyManager ?? APIKeyManager()
-        let resolvedModelService = modelService ?? ModelService()
+        let resolvedModelService  = modelService  ?? ModelService()
 
-        self.apiKeyManager = resolvedAPIKeyManager
-        self.modelService = resolvedModelService
-        self.serviceFactory = serviceFactory
+        self.apiKeyManager     = resolvedAPIKeyManager
+        self.modelService      = resolvedModelService
+        self.conversationStore = conversationStore
+        self.serviceFactory    = serviceFactory
+
         loadSavedConversations()
         reloadFromStorage(includeSecureStorage: true)
+    }
+
+    deinit {
+        pendingConversationSaveTask?.cancel()
     }
 
     // MARK: - Public interface
@@ -214,7 +221,7 @@ final class CompareViewModel: ObservableObject {
             return
         }
 
-        let prompt = normalizedText.isEmpty ? "(Attachment only)" : normalizedText
+        let prompt   = normalizedText.isEmpty ? "(Attachment only)" : normalizedText
         let summaries = attachments.map {
             AttachmentSummary(name: $0.name, mimeType: $0.mimeType,
                               previewBase64Data: $0.previewJPEGData?.base64EncodedString())
@@ -266,25 +273,22 @@ final class CompareViewModel: ObservableObject {
             let models = try await serviceFactory(provider, apiKey).listGenerateContentModels()
             let unique = modelService.updateCache(models, for: provider)
             availableModelsByProvider[provider] = modelsForPickerFromService(for: provider)
-            selectedModelsByProvider[provider] = modelService.selectedModelID(for: provider)
-            providerStatusByProvider[provider] = unique.isEmpty ? "No models returned." : "Loaded \(unique.count) model(s)."
+            selectedModelsByProvider[provider]  = modelService.selectedModelID(for: provider)
+            providerStatusByProvider[provider]  = unique.isEmpty ? "No models returned." : "Loaded \(unique.count) model(s)."
         } catch {
             if reportErrors { providerStatusByProvider[provider] = error.localizedDescription }
         }
     }
 
     private func executeRun(
-        for provider: AIProvider,
-        runID: UUID,
-        prompt: String,
-        attachments: [PendingAttachment]
+        for provider: AIProvider, runID: UUID, prompt: String, attachments: [PendingAttachment]
     ) async {
         let apiKey = apiKeysByProvider[provider] ?? ""
-        let model = selectedModel(for: provider)
+        let model  = selectedModel(for: provider)
 
         var chunks: [String] = []
         var accumulatedMedia: [GeneratedMedia] = []
-        var inputTokens = 0
+        var inputTokens  = 0
         var outputTokens = 0
 
         do {
@@ -311,7 +315,7 @@ final class CompareViewModel: ObservableObject {
             for try await chunk in stream {
                 chunks.append(chunk.text)
                 accumulatedMedia += chunk.generatedMedia
-                if chunk.inputTokens > 0 { inputTokens = chunk.inputTokens }
+                if chunk.inputTokens  > 0 { inputTokens  = chunk.inputTokens }
                 if chunk.outputTokens > 0 { outputTokens = chunk.outputTokens }
                 updateRun(runID: runID, provider: provider, result: CompareProviderResult(
                     state: .loading, modelID: model, text: chunks.joined(),
@@ -319,10 +323,11 @@ final class CompareViewModel: ObservableObject {
                     outputTokens: outputTokens, errorMessage: nil
                 ))
             }
+            let persistedMedia = conversationStore?.normalizeMedia(accumulatedMedia) ?? accumulatedMedia
             updateRun(runID: runID, provider: provider, result: CompareProviderResult(
                 state: .success, modelID: model,
                 text: chunks.joined().trimmingCharacters(in: .whitespacesAndNewlines),
-                generatedMedia: accumulatedMedia, inputTokens: inputTokens,
+                generatedMedia: persistedMedia, inputTokens: inputTokens,
                 outputTokens: outputTokens, errorMessage: nil
             ))
         } catch {
@@ -370,7 +375,7 @@ final class CompareViewModel: ObservableObject {
             guard let result = run.results[provider], result.state != .skipped else { continue }
             messages.append(ChatMessage(role: .user, text: run.prompt,
                                         createdAt: run.createdAt, attachments: run.attachments))
-            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text       = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             let hasPayload = !text.isEmpty || !result.generatedMedia.isEmpty
                 || result.inputTokens > 0 || result.outputTokens > 0
             guard hasPayload else { continue }
@@ -413,18 +418,29 @@ final class CompareViewModel: ObservableObject {
     }
 
     private func loadSavedConversations() {
-        guard !compareConversationsStore.isEmpty,
-              let data = compareConversationsStore.data(using: .utf8),
-              let decoded = try? JSONDecoder().decode([CompareConversation].self, from: data) else {
+        guard let conversationStore else { savedConversations = []; return }
+        do {
+            savedConversations = try conversationStore.loadConversations()
+        } catch {
             savedConversations = []
-            return
         }
-        savedConversations = decoded.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     private func persistSavedConversations() {
-        guard let data = try? JSONEncoder().encode(savedConversations),
-              let encoded = String(data: data, encoding: .utf8) else { return }
-        compareConversationsStore = encoded
+        guard let conversationStore else { return }
+        let snapshot = savedConversations
+        pendingConversationSaveTask?.cancel()
+        pendingConversationSaveTask = Task { [weak self, snapshot] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let self, !Task.isCancelled else { return }
+            do {
+                let normalized = try conversationStore.saveConversations(snapshot)
+                guard !Task.isCancelled else { return }
+                self.savedConversations = normalized
+                self.pendingConversationSaveTask = nil
+            } catch {
+                self.pendingConversationSaveTask = nil
+            }
+        }
     }
 }

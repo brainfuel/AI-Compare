@@ -1,6 +1,6 @@
-# AI Tools
+# AI Compare
 
-A SwiftUI AI playground app for chatting with multiple providers from one interface, in either single-chat or side-by-side compare mode.
+A SwiftUI AI compare playground for chatting with Gemini, OpenAI, Anthropic, and Grok from one interface, in either single-chat or side-by-side compare mode.
 
 ## Download
 
@@ -10,15 +10,15 @@ A SwiftUI AI playground app for chatting with multiple providers from one interf
 
 ## Screenshots
 
-![AI Tools app screenshot 1](docs/images/screenshot1.png)
-![AI Tools app screenshot 2](docs/images/screenshot2.png)
+![AI Compare app screenshot 1](docs/images/screenshot1.png)
+![AI Compare app screenshot 2](docs/images/screenshot2.png)
 
 ## Overview
 
-AI Tools lets you:
+AI Compare lets you:
 
 - switch between Gemini, OpenAI, Anthropic, and Grok
-- run in `Single` mode (normal chat) or `Compare` mode (same prompt across providers)
+- run in `Single` mode for normal chat or `Compare` mode for side-by-side provider comparison
 - load and cache available models per provider
 - keep local history with searchable threads
 - send prompts with optional attachments
@@ -89,8 +89,9 @@ xcodebuild -project "AI Tools.xcodeproj" -scheme "AI Tools" -configuration Debug
 
 - API keys are stored securely in the system Keychain.
 - Single-chat conversations are stored locally with SwiftData.
-- Compare-mode conversations are stored locally in `@AppStorage` as JSON (`compare_conversations_v1`).
+- Compare-mode conversations are stored locally with SwiftData.
 - Model selections and model-list caches are stored locally with `@AppStorage`.
+- Generated media is written to a local Application Support folder and referenced from SwiftData records.
 - No server-side app backend is included in this project.
 
 ## Testing
@@ -119,9 +120,12 @@ xcodebuild -project "AI Tools.xcodeproj" -scheme "AI Tools" -destination "platfo
 - [AI Tools/Networking/OpenAIClient.swift](AI%20Tools/Networking/OpenAIClient.swift): OpenAI API integration
 - [AI Tools/Networking/AnthropicClient.swift](AI%20Tools/Networking/AnthropicClient.swift): Anthropic API integration
 - [AI Tools/Networking/GrokClient.swift](AI%20Tools/Networking/GrokClient.swift): xAI Grok API integration
-- [AI Tools/Storage/ConversationStore.swift](AI%20Tools/Storage/ConversationStore.swift): SwiftData conversation persistence
+- [AI Tools/Storage/ConversationStore.swift](AI%20Tools/Storage/ConversationStore.swift): SwiftData-backed single-chat persistence and media normalization
+- [AI Tools/Storage/CompareConversationStore.swift](AI%20Tools/Storage/CompareConversationStore.swift): SwiftData-backed compare conversation persistence
+- [AI Tools/Views/ContentWorkspaceViews.swift](AI%20Tools/Views/ContentWorkspaceViews.swift): Extracted sidebar, composer, and compare workspace views
 - [AI Tools/Views/ChatRenderingViews.swift](AI%20Tools/Views/ChatRenderingViews.swift): Message/media rendering components
 - [AI ToolsTests/PlaygroundViewModelTests.swift](AI%20ToolsTests/PlaygroundViewModelTests.swift): Model cache and prefetch unit tests
+- [AI ToolsTests/ConversationStoreTests.swift](AI%20ToolsTests/ConversationStoreTests.swift): Conversation storage round-trip coverage
 
 ## Known Limitations
 
