@@ -164,22 +164,24 @@ struct ContentView: View {
 
             List {
                 if workspaceMode == .single {
-                    Button {
-                        viewModel.selectConversation(nil)
-                    } label: {
-                        HStack {
-                            Image(systemName: "plus.bubble")
-                            Text("Current Chat")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
+                    if viewModel.selectedConversationID == nil {
+                        Button {
+                            viewModel.startNewChat()
+                        } label: {
+                            HStack {
+                                Image(systemName: "plus.bubble")
+                                Text("New Chat")
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .padding(.vertical, 4)
+                        .listRowBackground(AppTheme.brandTint.opacity(0.14))
                     }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                    .listRowBackground(viewModel.selectedConversationID == nil ? AppTheme.brandTint.opacity(0.14) : Color.clear)
 
                     ForEach(viewModel.filteredConversations(query: historySearch)) { conversation in
                         Button {
@@ -201,22 +203,24 @@ struct ContentView: View {
                         .listRowBackground(viewModel.selectedConversationID == conversation.id ? AppTheme.brandTint.opacity(0.14) : Color.clear)
                     }
                 } else {
-                    Button {
-                        compareViewModel.selectConversation(nil)
-                    } label: {
-                        HStack {
-                            Image(systemName: "rectangle.3.group.bubble.left")
-                            Text("Current Compare")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
+                    if compareViewModel.selectedConversationID == nil {
+                        Button {
+                            compareViewModel.startNewThread()
+                        } label: {
+                            HStack {
+                                Image(systemName: "rectangle.3.group.bubble.left")
+                                Text("New Compare")
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .padding(.vertical, 4)
+                        .listRowBackground(AppTheme.brandTint.opacity(0.14))
                     }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                    .listRowBackground(compareViewModel.selectedConversationID == nil ? AppTheme.brandTint.opacity(0.14) : Color.clear)
 
                     ForEach(compareViewModel.filteredConversations(query: historySearch)) { conversation in
                         Button {
