@@ -165,6 +165,7 @@ struct WorkspaceDetailView: View {
     @Binding var workspaceMode: WorkspaceMode
     let continueProviderInSingle: (AIProvider) -> Void
     @State private var showingUsageStats = false
+    @State private var showingSynthesis = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -200,7 +201,21 @@ struct WorkspaceDetailView: View {
                     }
                     .help("Usage Stats")
                 }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        compareViewModel.synthesisState = .idle
+                        showingSynthesis = true
+                    } label: {
+                        Label("Synthesise", systemImage: "wand.and.stars")
+                    }
+                    .help("Synthesise all responses")
+                    .disabled(compareViewModel.runs.isEmpty || compareViewModel.isSending)
+                }
             }
+        }
+        .sheet(isPresented: $showingSynthesis) {
+            CompareSynthesisView(compareViewModel: compareViewModel)
         }
         .sheet(isPresented: $showingUsageStats) {
             UsageStatsSheet(
@@ -424,6 +439,15 @@ struct SingleComposerSection: View {
 #endif
         }
         .frame(minHeight: 90, maxHeight: 150)
+        .overlay(alignment: .topLeading) {
+            if prompt.isEmpty {
+                Text("Ask a question…")
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 10)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isDropTargeted ? AppTheme.brandTint : AppTheme.cardBorder,
@@ -440,21 +464,67 @@ struct SingleComposerSection: View {
     }
 }
 
+// MARK: - Column header button style
+
+private struct ColumnHeaderIconButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .imageScale(.medium)
+            .foregroundStyle(isEnabled ? AppTheme.brandTint : Color.secondary)
+            .opacity(configuration.isPressed ? 0.65 : 1.0)
+    }
+}
+
 // MARK: - Compare workspace
 
 struct CompareWorkspaceView: View {
     @ObservedObject var compareViewModel: CompareViewModel
     let continueProviderInSingle: (AIProvider) -> Void
+    @State private var expandedProvider: AIProvider? = nil
+    @State private var isAnimating = false
+
+    private let animationDuration: TimeInterval = 0.18
 
     var body: some View {
         VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 ForEach(AIProvider.allCases) { provider in
-                    CompareProviderColumnView(
-                        compareViewModel: compareViewModel,
-                        provider: provider,
-                        continueProviderInSingle: continueProviderInSingle
-                    )
+                    if expandedProvider == nil || expandedProvider == provider {
+                        CompareProviderColumnView(
+                            state: CompareProviderColumnState(
+                                provider: provider,
+                                displayName: provider.displayName,
+                                hasAPIKey: compareViewModel.hasAPIKey(for: provider),
+                                selectedModel: compareViewModel.selectedModel(for: provider),
+                                availableModels: compareViewModel.modelsForPicker(for: provider),
+                                providerStatusMessage: compareViewModel.providerStatusMessage(provider),
+                                isEnabled: compareViewModel.isProviderEnabled(provider),
+                                canContinueInSingle: compareViewModel.canContinueInSingle(for: provider),
+                                isSending: compareViewModel.isSending
+                            ),
+                            runs: compareViewModel.runsChronological,
+                            provider: provider,
+                            continueProviderInSingle: continueProviderInSingle,
+                            isExpanded: expandedProvider == provider,
+                            isAnimating: isAnimating,
+                            latestRunID: compareViewModel.latestRunID,
+                            onSelectModel: { compareViewModel.selectModel($0, for: provider) },
+                            onToggleProviderEnabled: { compareViewModel.setProviderEnabled(provider, $0) },
+                            onRefreshModels: { Task { await compareViewModel.refreshModels(for: provider) } },
+                            onToggleExpand: {
+                                isAnimating = true
+                                withAnimation(.easeOut(duration: animationDuration)) {
+                                    expandedProvider = expandedProvider == provider ? nil : provider
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration + 0.05) {
+                                    isAnimating = false
+                                }
+                            }
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -465,50 +535,91 @@ struct CompareWorkspaceView: View {
 }
 
 struct CompareProviderColumnView: View {
-    @ObservedObject var compareViewModel: CompareViewModel
+    let state: CompareProviderColumnState
+    let runs: [CompareRun]
     let provider: AIProvider
     let continueProviderInSingle: (AIProvider) -> Void
+    var isExpanded: Bool = false
+    var isAnimating: Bool = false
+    let latestRunID: UUID?
+    let onSelectModel: (String) -> Void
+    let onToggleProviderEnabled: (Bool) -> Void
+    let onRefreshModels: () -> Void
+    var onToggleExpand: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(provider.displayName).font(.headline)
+            HStack(spacing: 4) {
+                Button(action: onToggleExpand) {
+                    Image(systemName: isExpanded
+                          ? "arrow.down.right.and.arrow.up.left"
+                          : "arrow.up.left.and.arrow.down.right")
+                }
+                .buttonStyle(ColumnHeaderIconButtonStyle())
+                .help(isExpanded ? "Collapse" : "Expand to full width")
+
+                Text(provider.displayName)
+                    .font(.headline)
+                    .foregroundStyle(state.isEnabled ? .primary : .secondary)
                 Spacer()
                 Button {
                     continueProviderInSingle(provider)
                 } label: {
-                    Image(systemName: "arrowshape.turn.up.right.circle").imageScale(.large)
+                    Image(systemName: "arrow.right.square")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ColumnHeaderIconButtonStyle())
                 .help("Open \(provider.displayName) compare history in Single mode")
-                .disabled(!compareViewModel.canContinueInSingle(for: provider) || compareViewModel.isSending)
+                .disabled(!state.canContinueInSingle || state.isSending)
 
-                if compareViewModel.hasAPIKey(for: provider) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).help("API key is configured")
+                PDFExportButton(filename: "\(provider.displayName)-responses.pdf") {
+                    PDFBuilder.compareResponse(
+                        provider: provider,
+                        runs: runs
+                    )
+                }
+                .buttonStyle(ColumnHeaderIconButtonStyle())
+                .disabled(runs.allSatisfy {
+                    $0.results[provider]?.state != .success
+                })
+
+                if state.hasAPIKey {
+                    Toggle(isOn: Binding(
+                        get: { state.isEnabled },
+                        set: { onToggleProviderEnabled($0) }
+                    )) { EmptyView() }
+                    .toggleStyle(.checkbox)
+                    .help(state.isEnabled ? "Included in Send All" : "Excluded from Send All")
+                    .disabled(state.isSending)
+
+                    Text("Connected")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green.opacity(0.85), in: Capsule())
+                        .help("API key is configured")
                 } else {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).help("Missing API key")
                 }
             }
 
             HStack(spacing: 8) {
-                if compareViewModel.modelsForPicker(for: provider).isEmpty {
+                if state.availableModels.isEmpty {
                     Text("No models cached").font(.caption).foregroundStyle(.secondary)
                 } else {
                     Picker("Model", selection: compareModelBinding) {
-                        ForEach(compareViewModel.modelsForPicker(for: provider), id: \.self) { model in
+                        ForEach(state.availableModels, id: \.self) { model in
                             Text(model).tag(model)
                         }
                     }
                     .pickerStyle(.menu)
                 }
-                Button("Load") {
-                    Task { await compareViewModel.refreshModels(for: provider) }
-                }
+                Button("Load", action: onRefreshModels)
                 .buttonStyle(.bordered)
-                .disabled(compareViewModel.isSending || !compareViewModel.hasAPIKey(for: provider))
+                .disabled(state.isSending || !state.hasAPIKey)
             }
 
-            if let message = compareViewModel.providerStatusMessage(provider), !message.isEmpty {
+            if let message = state.providerStatusMessage, !message.isEmpty {
                 Text(message).font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -516,34 +627,38 @@ struct CompareProviderColumnView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        let displayedRuns = compareViewModel.runsChronological
-                        if displayedRuns.isEmpty {
-                            Text(compareEmptyStateMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(displayedRuns) { run in
-                                CompareRunCardView(run: run, provider: provider).id(run.id)
+                    if isAnimating {
+                        // Hide markdown content during resize animation so Textual
+                        // doesn't recalculate layout on every frame.
+                        Color.clear
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            let displayedRuns = runs
+                            if displayedRuns.isEmpty {
+                                Text(compareEmptyStateMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(displayedRuns) { run in
+                                    CompareRunCardView(run: run, provider: provider, isAnimating: isAnimating).id(run.id)
+                                }
                             }
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .textSelection(.enabled)
-                .onChange(of: compareViewModel.runs.count) {
-                    if let lastID = compareViewModel.runsChronological.last?.id {
-                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .onChange(of: compareViewModel.selectedConversationID) {
-                    if let lastID = compareViewModel.runsChronological.last?.id {
-                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                .conditionalTextSelection(!isAnimating)
+                .onChange(of: latestRunID) { _, newValue in
+                    guard let newValue else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                        proxy.scrollTo(newValue, anchor: .bottom)
                     }
                 }
                 .onAppear {
-                    if let lastID = compareViewModel.runsChronological.last?.id {
-                        DispatchQueue.main.async { proxy.scrollTo(lastID, anchor: .bottom) }
+                    if let lastID = runs.last?.id {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            proxy.scrollTo(lastID, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -556,7 +671,7 @@ struct CompareProviderColumnView: View {
     }
 
     private var compareEmptyStateMessage: String {
-        if compareViewModel.hasAPIKey(for: provider) {
+        if state.hasAPIKey {
             return "No compare runs yet."
         }
         return "Add an API key in Single mode to start comparing."
@@ -564,15 +679,28 @@ struct CompareProviderColumnView: View {
 
     private var compareModelBinding: Binding<String> {
         Binding(
-            get: { compareViewModel.selectedModel(for: provider) },
-            set: { compareViewModel.selectModel($0, for: provider) }
+            get: { state.selectedModel },
+            set: { onSelectModel($0) }
         )
     }
+}
+
+struct CompareProviderColumnState: Equatable {
+    let provider: AIProvider
+    let displayName: String
+    let hasAPIKey: Bool
+    let selectedModel: String
+    let availableModels: [String]
+    let providerStatusMessage: String?
+    let isEnabled: Bool
+    let canContinueInSingle: Bool
+    let isSending: Bool
 }
 
 struct CompareRunCardView: View {
     let run: CompareRun
     let provider: AIProvider
+    var isAnimating: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -598,12 +726,12 @@ struct CompareRunCardView: View {
                         Text("Thinking...").foregroundStyle(.secondary)
                     }
                     if !result.text.isEmpty {
-                        MarkdownText(result.text)
+                        MarkdownText(result.text, selectable: !isAnimating)
                             .padding(8).background(AppTheme.surfacePrimary).clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 case .success:
                     if !result.text.isEmpty {
-                        MarkdownText(result.text)
+                        MarkdownText(result.text, selectable: !isAnimating)
                             .padding(8).background(AppTheme.surfacePrimary).clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     if !result.generatedMedia.isEmpty {
@@ -662,6 +790,15 @@ struct CompareComposerSection: View {
 #endif
             }
             .frame(minHeight: 90, maxHeight: 150)
+            .overlay(alignment: .topLeading) {
+                if prompt.isEmpty {
+                    Text("Ask a question…")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 10)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(isDropTargeted ? AppTheme.brandTint : AppTheme.cardBorder,
@@ -896,6 +1033,259 @@ struct UsageStatsSheet: View {
         }
         .padding(16)
         .frame(minWidth: 420, minHeight: 250)
+    }
+}
+
+// MARK: - Compare Synthesis Sheet
+
+struct CompareSynthesisView: View {
+    @ObservedObject var compareViewModel: CompareViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedProvider: AIProvider = AIProvider.allCases.first!
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Synthesise Responses")
+                        .font(.title2.weight(.semibold))
+                    Text("Collapses all model responses into consensus, disagreements, unique points, and suspicious claims.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if case .success(let result) = compareViewModel.synthesisState {
+                    PDFExportButton(filename: "synthesis.pdf") {
+                        PDFBuilder.synthesisResult(result)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.title2)
+                    .foregroundStyle(AppTheme.brandTint)
+                }
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+
+            Divider()
+
+            // Provider picker + run button
+            HStack(spacing: 12) {
+                Text("Synthesise using")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Picker("Provider", selection: $selectedProvider) {
+                    ForEach(AIProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 140)
+                Spacer()
+                Button {
+                    Task { await compareViewModel.synthesize(using: selectedProvider) }
+                } label: {
+                    if case .synthesizing = compareViewModel.synthesisState {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Run", systemImage: "wand.and.stars")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled({
+                    if case .synthesizing = compareViewModel.synthesisState { return true }
+                    return !compareViewModel.hasAPIKey(for: selectedProvider)
+                }())
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(AppTheme.surfaceSecondary)
+
+            Divider()
+
+            // Result area
+            ScrollView {
+                switch compareViewModel.synthesisState {
+                case .idle:
+                    VStack(spacing: 8) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("Pick a model and tap Run to synthesise all responses in this thread.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(48)
+
+                case .synthesizing:
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Synthesising…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(48)
+
+                case .failed(let message):
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.orange)
+                        Text(message)
+                            .font(.subheadline)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(48)
+
+                case .success(let result):
+                    VStack(alignment: .leading, spacing: 20) {
+                        if result.isEmpty {
+                            Text("The model returned no structured output. Try again or use a different provider.")
+                                .foregroundStyle(.secondary)
+                                .padding()
+                        } else {
+                            if !result.consensus.isEmpty {
+                                SynthesisSectionView(
+                                    title: "Consensus",
+                                    subtitle: "All or most models agree",
+                                    icon: "checkmark.seal.fill",
+                                    iconColor: .green
+                                ) {
+                                    ForEach(result.consensus) { item in
+                                        SynthesisRowView(text: item.text)
+                                    }
+                                }
+                            }
+                            if !result.disagreements.isEmpty {
+                                SynthesisSectionView(
+                                    title: "Disagreements",
+                                    subtitle: "Direct contradictions between models",
+                                    icon: "arrow.triangle.2.circlepath",
+                                    iconColor: .orange
+                                ) {
+                                    ForEach(result.disagreements) { d in
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text(d.topic)
+                                                .font(.subheadline.weight(.medium))
+                                            ForEach(d.positions, id: \.model) { pos in
+                                                HStack(alignment: .top, spacing: 8) {
+                                                    Text(pos.model)
+                                                        .font(.caption.weight(.semibold))
+                                                        .foregroundStyle(AppTheme.brandTint)
+                                                        .frame(width: 90, alignment: .leading)
+                                                    Text(pos.position)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                                }
+                                            }
+                                        }
+                                        .padding(10)
+                                        .background(AppTheme.surfaceSecondary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                            }
+                            if !result.unique.isEmpty {
+                                SynthesisSectionView(
+                                    title: "Unique Points",
+                                    subtitle: "Only one model mentioned this",
+                                    icon: "sparkle",
+                                    iconColor: AppTheme.brandTint
+                                ) {
+                                    ForEach(result.unique) { u in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Text(u.source)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(AppTheme.brandTint)
+                                                .frame(width: 90, alignment: .leading)
+                                            Text(u.claim)
+                                                .font(.subheadline)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                        .padding(10)
+                                        .background(AppTheme.surfaceSecondary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
+                                }
+                            }
+                            if !result.suspicious.isEmpty {
+                                SynthesisSectionView(
+                                    title: "Suspicious Claims",
+                                    subtitle: "Potentially questionable or unverifiable",
+                                    icon: "questionmark.diamond.fill",
+                                    iconColor: .red
+                                ) {
+                                    ForEach(result.suspicious) { item in
+                                        SynthesisRowView(text: item.text)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(minWidth: 600, minHeight: 500)
+        .background(AppTheme.canvasBackground)
+        .onAppear {
+            if let first = AIProvider.allCases.first(where: { compareViewModel.hasAPIKey(for: $0) }) {
+                selectedProvider = first
+            }
+        }
+    }
+}
+
+private struct SynthesisSectionView<Content: View>: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let iconColor: Color
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundStyle(iconColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.headline)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) { content }
+        }
+        .padding(14)
+        .background(AppTheme.surfacePrimary)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppTheme.cardBorder, lineWidth: 1))
+    }
+}
+
+private struct SynthesisRowView: View {
+    let text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 5, height: 5)
+                .padding(.top, 7)
+            Text(text)
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

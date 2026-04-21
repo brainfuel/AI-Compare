@@ -10,12 +10,15 @@ final class CompareViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published private(set) var isSending = false
     @Published var pendingAttachments: [PendingAttachment] = []
+    @Published var latestRunID: UUID?
 
     // @Published mirrors so SwiftUI redraws pickers/status icons when services update.
     @Published private var selectedModelsByProvider: [AIProvider: String] = [:]
     @Published private var availableModelsByProvider: [AIProvider: [String]] = [:]
     @Published private var apiKeysByProvider: [AIProvider: String] = [:]
     @Published private var providerStatusByProvider: [AIProvider: String] = [:]
+    @Published var disabledProviders: Set<AIProvider> = []
+    @Published var synthesisState: SynthesisState = .idle
 
     private let apiKeyManager: APIKeyManager
     private let modelService: ModelService
@@ -62,16 +65,21 @@ final class CompareViewModel: ObservableObject {
     }
 
     var readyProviders: [AIProvider] {
-        AIProvider.allCases.filter { hasAPIKey(for: $0) && !selectedModel(for: $0).isEmpty }
-    }
-
-    var runsChronological: [CompareRun] {
-        runs.sorted { lhs, rhs in
-            lhs.createdAt == rhs.createdAt
-                ? lhs.id.uuidString < rhs.id.uuidString
-                : lhs.createdAt < rhs.createdAt
+        AIProvider.allCases.filter {
+            hasAPIKey(for: $0) && !selectedModel(for: $0).isEmpty && !disabledProviders.contains($0)
         }
     }
+
+    func isProviderEnabled(_ provider: AIProvider) -> Bool {
+        !disabledProviders.contains(provider)
+    }
+
+    func setProviderEnabled(_ provider: AIProvider, _ enabled: Bool) {
+        if enabled { disabledProviders.remove(provider) }
+        else       { disabledProviders.insert(provider) }
+    }
+
+    var runsChronological: [CompareRun] { runs }
 
     func loadOnLaunchIfNeeded() async {
         guard !didAutoLoadModels else { return }
@@ -166,7 +174,6 @@ final class CompareViewModel: ObservableObject {
 
         let selected = selectedModel(for: provider).trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackModel = runs
-            .sorted { $0.createdAt < $1.createdAt }
             .compactMap { run -> String? in
                 let model = run.results[provider]?.modelID.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 return model.isEmpty ? nil : model
@@ -245,7 +252,8 @@ final class CompareViewModel: ObservableObject {
 
         let run = CompareRun(id: UUID(), prompt: prompt, attachments: summaries,
                              createdAt: Date(), results: initialResults)
-        runs.insert(run, at: 0)
+        runs.append(run)
+        latestRunID = run.id
         upsertCurrentConversation()
 
         let runID = run.id
@@ -259,6 +267,105 @@ final class CompareViewModel: ObservableObject {
         }
         isSending = false
         upsertCurrentConversation()
+    }
+
+    // MARK: - Synthesis
+
+    func synthesize(using provider: AIProvider) async {
+        let apiKey = apiKeysByProvider[provider] ?? ""
+        let model  = selectedModel(for: provider)
+        guard !apiKey.isEmpty, !model.isEmpty else {
+            synthesisState = .failed("\(provider.displayName) is not configured.")
+            return
+        }
+
+        let sortedRuns = runsChronological
+        guard !sortedRuns.isEmpty else {
+            synthesisState = .failed("No runs to synthesise.")
+            return
+        }
+
+        // Gather successful responses grouped by provider
+        var responseBlocks: [String] = []
+        for p in AIProvider.allCases {
+            var parts: [String] = []
+            for run in sortedRuns {
+                guard let result = run.results[p],
+                      result.state == .success,
+                      !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { continue }
+                parts.append("Q: \(run.prompt)\nA: \(result.text)")
+            }
+            guard !parts.isEmpty else { continue }
+            let label = p.displayName
+            responseBlocks.append("=== \(label) ===\n\(parts.joined(separator: "\n\n"))")
+        }
+
+        guard !responseBlocks.isEmpty else {
+            synthesisState = .failed("No successful responses found to synthesise.")
+            return
+        }
+
+        synthesisState = .synthesizing
+
+        let body = responseBlocks.joined(separator: "\n\n")
+        let userPrompt = """
+        Below are responses from multiple AI models to the same conversation thread.
+
+        \(body)
+
+        Analyse these responses and output ONLY valid JSON (no markdown fences, no preamble) in exactly this format:
+        {
+          "consensus": ["a claim all or most models agree on"],
+          "disagreements": [{"topic": "point of contention", "positions": {"Model A": "its view", "Model B": "its view"}}],
+          "unique": [{"claim": "something only one model said", "source": "Model A"}],
+          "suspicious": ["a claim that looks questionable or unverifiable"]
+        }
+        """
+
+        let messages = [ChatMessage(role: .user, text: userPrompt, attachments: [])]
+        do {
+            var chunks: [String] = []
+            let stream = serviceFactory(provider, apiKey).generateReplyStream(
+                modelID: model,
+                systemInstruction: "You are a precise synthesis assistant. Output only valid JSON with no extra text.",
+                messages: messages,
+                latestUserAttachments: []
+            )
+            for try await chunk in stream { chunks.append(chunk.text) }
+
+            let raw = chunks.joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "^```json\\s*", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "\\s*```$",    with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard let data = raw.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                synthesisState = .failed("Could not parse the synthesis response as JSON.")
+                return
+            }
+
+            let consensus = (json["consensus"] as? [String] ?? []).map { SynthesisItem(text: $0) }
+            let unique    = (json["unique"] as? [[String: String]] ?? []).compactMap { u -> SynthesisUniquePoint? in
+                guard let claim = u["claim"], let source = u["source"] else { return nil }
+                return SynthesisUniquePoint(claim: claim, source: source)
+            }
+            let suspicious = (json["suspicious"] as? [String] ?? []).map { SynthesisItem(text: $0) }
+            let disagreements = (json["disagreements"] as? [[String: Any]] ?? []).compactMap { d -> SynthesisDisagreement? in
+                guard let topic     = d["topic"] as? String,
+                      let positions = d["positions"] as? [String: String] else { return nil }
+                let sorted = positions.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+                return SynthesisDisagreement(topic: topic, positions: sorted)
+            }
+
+            synthesisState = .success(SynthesisResult(
+                consensus: consensus, disagreements: disagreements,
+                unique: unique, suspicious: suspicious
+            ))
+        } catch {
+            synthesisState = .failed(error.localizedDescription)
+        }
     }
 
     // MARK: - Private: model fetching
@@ -292,7 +399,7 @@ final class CompareViewModel: ObservableObject {
         var outputTokens = 0
 
         do {
-            let priorRunsOldestFirst = runs.filter { $0.id != runID }.reversed()
+            let priorRunsOldestFirst = runs.filter { $0.id != runID }
             var messages: [ChatMessage] = []
             for priorRun in priorRunsOldestFirst {
                 messages.append(ChatMessage(role: .user, text: priorRun.prompt, attachments: priorRun.attachments))
@@ -312,16 +419,21 @@ final class CompareViewModel: ObservableObject {
                 modelID: model, systemInstruction: "",
                 messages: messages, latestUserAttachments: attachments
             )
+            var lastUIUpdate = Date.distantPast
             for try await chunk in stream {
                 chunks.append(chunk.text)
                 accumulatedMedia += chunk.generatedMedia
                 if chunk.inputTokens  > 0 { inputTokens  = chunk.inputTokens }
                 if chunk.outputTokens > 0 { outputTokens = chunk.outputTokens }
-                updateRun(runID: runID, provider: provider, result: CompareProviderResult(
-                    state: .loading, modelID: model, text: chunks.joined(),
-                    generatedMedia: accumulatedMedia, inputTokens: inputTokens,
-                    outputTokens: outputTokens, errorMessage: nil
-                ))
+                let now = Date()
+                if now.timeIntervalSince(lastUIUpdate) >= 0.05 {
+                    lastUIUpdate = now
+                    updateRun(runID: runID, provider: provider, result: CompareProviderResult(
+                        state: .loading, modelID: model, text: chunks.joined(),
+                        generatedMedia: accumulatedMedia, inputTokens: inputTokens,
+                        outputTokens: outputTokens, errorMessage: nil
+                    ))
+                }
             }
             let persistedMedia = conversationStore?.normalizeMedia(accumulatedMedia) ?? accumulatedMedia
             updateRun(runID: runID, provider: provider, result: CompareProviderResult(
@@ -371,7 +483,7 @@ final class CompareViewModel: ObservableObject {
 
     private func singleChatMessages(for provider: AIProvider) -> [ChatMessage] {
         var messages: [ChatMessage] = []
-        for run in runs.sorted(by: { $0.createdAt < $1.createdAt }) {
+        for run in runs {
             guard let result = run.results[provider], result.state != .skipped else { continue }
             messages.append(ChatMessage(role: .user, text: run.prompt,
                                         createdAt: run.createdAt, attachments: run.attachments))
