@@ -577,7 +577,12 @@ struct CompareProviderColumnView: View {
                 .help(isExpanded ? "Collapse" : "Expand to full width")
 
                 Text(provider.displayName)
+#if os(iOS)
+                    .font(.subheadline.weight(.semibold))
+#else
                     .font(.headline)
+#endif
+                    .lineLimit(1)
                     .foregroundStyle(state.isEnabled ? .primary : .secondary)
                 Spacer()
                 Button {
