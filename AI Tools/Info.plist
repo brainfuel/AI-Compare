@@ -5,11 +5,20 @@
 	<key>CFBundleDisplayName</key>
 	<string>AI Compare</string>
 
+	<!-- Disables iPad multitasking (Split View / Slide Over).
+	     Without this, Apple requires all 4 orientations. -->
+	<key>UIRequiresFullScreen</key>
+	<true/>
+
 	<!-- iPad: landscape only -->
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
+	<!-- Photo library access for the camera/photo picker button -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Add photos from your library to your AI conversation.</string>
 </dict>
 </plist>
