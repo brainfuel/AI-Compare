@@ -26,6 +26,7 @@ final class CompareViewModel: ObservableObject {
     private let conversationStore: CompareConversationStore?
     private var pendingConversationSaveTask: Task<Void, Never>?
     private var didAutoLoadModels = false
+    private var sendTask: Task<Void, Never>?
 
     init(
         apiKeyManager: APIKeyManager? = nil,
@@ -54,6 +55,7 @@ final class CompareViewModel: ObservableObject {
 
     deinit {
         pendingConversationSaveTask?.cancel()
+        sendTask?.cancel()
     }
 
     // MARK: - Public interface
@@ -218,7 +220,43 @@ final class CompareViewModel: ObservableObject {
         }
     }
 
-    func sendCompare(text: String) async {
+    /// Starts a compare send. The in-flight task is stored on `sendTask` so the
+    /// UI can cancel it via `cancelSend()`; callers don't need to await.
+    func startSendCompare(text: String, targetProvider: AIProvider? = nil) {
+        sendTask?.cancel()
+        sendTask = Task { [weak self] in
+            await self?.sendCompare(text: text, targetProvider: targetProvider)
+        }
+    }
+
+    /// Cancels the in-flight compare send (if any). Each provider's in-flight
+    /// request will throw `CancellationError`, which is caught in `executeRun`
+    /// and surfaced as a failed state with a "Cancelled" message.
+    func cancelSend() {
+        sendTask?.cancel()
+    }
+
+    /// Re-runs a single provider within an existing run using the currently
+    /// selected model. Attachments from the original run are NOT re-sent
+    /// (they were consumed when the run was first dispatched); the prompt and
+    /// prior conversation context are preserved.
+    func retryProvider(runID: UUID, provider: AIProvider) {
+        guard let run = runs.first(where: { $0.id == runID }) else { return }
+        let model = selectedModel(for: provider)
+        guard !model.isEmpty, hasAPIKey(for: provider) else { return }
+
+        updateRun(runID: runID, provider: provider, result: CompareProviderResult(
+            state: .loading, modelID: model, text: "", generatedMedia: [],
+            inputTokens: 0, outputTokens: 0, errorMessage: nil
+        ))
+
+        Task { [weak self] in
+            await self?.executeRun(for: provider, runID: runID, prompt: run.prompt, attachments: [])
+            self?.upsertCurrentConversation()
+        }
+    }
+
+    func sendCompare(text: String, targetProvider: AIProvider? = nil) async {
         errorMessage = nil
         let attachments = pendingAttachments
         pendingAttachments = []
@@ -226,7 +264,18 @@ final class CompareViewModel: ObservableObject {
         let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedText.isEmpty || !attachments.isEmpty else { return }
 
-        let providers = readyProviders
+        // If a specific provider was requested, narrow to that one (only if
+        // it's ready); otherwise dispatch to all ready providers.
+        let providers: [AIProvider]
+        if let target = targetProvider {
+            guard readyProviders.contains(target) else {
+                errorMessage = "\(target.displayName) is not ready. Check API key and selected model."
+                return
+            }
+            providers = [target]
+        } else {
+            providers = readyProviders
+        }
         guard !providers.isEmpty else {
             errorMessage = "No provider is ready. Add at least one API key in Single mode."
             return
@@ -479,9 +528,10 @@ final class CompareViewModel: ObservableObject {
                 outputTokens: outputTokens, errorMessage: nil
             ))
         } catch {
+            let message: String = (error is CancellationError) ? "Cancelled." : error.localizedDescription
             updateRun(runID: runID, provider: provider, result: CompareProviderResult(
                 state: .failed, modelID: model, text: "", generatedMedia: [],
-                inputTokens: 0, outputTokens: 0, errorMessage: error.localizedDescription
+                inputTokens: 0, outputTokens: 0, errorMessage: message
             ))
         }
     }
