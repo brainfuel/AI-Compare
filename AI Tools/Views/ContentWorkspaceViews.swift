@@ -237,31 +237,100 @@ struct WorkspaceDetailView: View {
 
 struct SingleWorkspaceView: View {
     @ObservedObject var viewModel: PlaygroundViewModel
+    @AppStorage("singleConnectionExpanded") private var isConnectionExpanded = true
 
     var body: some View {
         VStack(spacing: 12) {
-            SingleConfigurationSection(viewModel: viewModel)
+            SingleConfigurationSection(viewModel: viewModel, isExpanded: $isConnectionExpanded)
             Divider()
-            SingleMessagesSection(viewModel: viewModel)
+            SingleMessagesSection(viewModel: viewModel, onScroll: collapseConnection)
             SingleComposerSection(viewModel: viewModel)
         }
+    }
+
+    private func collapseConnection() {
+        guard isConnectionExpanded else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            isConnectionExpanded = false
+        }
+    }
+}
+
+private struct ConnectionContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
 struct SingleConfigurationSection: View {
     @ObservedObject var viewModel: PlaygroundViewModel
+    @Binding var isExpanded: Bool
     @State private var isKeyHidden = true
+    @State private var measuredHeight: CGFloat = 0
 
     var body: some View {
-        GroupBox("Connection") {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Provider", selection: $viewModel.selectedProvider) {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .frame(width: 18)
+                        Text("Connection").font(.headline)
+                        if !isExpanded {
+                            Text("\(viewModel.selectedProvider.displayName) · \(viewModel.modelID.isEmpty ? "no model" : viewModel.modelID)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .transition(.opacity)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    connectionContent
+                }
+                .padding(.top, 10)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(
+                    GeometryReader { g in
+                        Color.clear.preference(key: ConnectionContentHeightKey.self, value: g.size.height)
+                    }
+                )
+                .frame(height: isExpanded ? measuredHeight : 0, alignment: .top)
+                .opacity(isExpanded ? 1 : 0)
+                .clipped()
+                .allowsHitTesting(isExpanded)
+                .onPreferenceChange(ConnectionContentHeightKey.self) { newValue in
+                    if newValue > 0 { measuredHeight = newValue }
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
+        }
+        .groupBoxStyle(ThemeGroupBoxStyle())
+    }
+
+    @ViewBuilder
+    private var connectionContent: some View {
+        Group {
+            Picker("Provider", selection: $viewModel.selectedProvider) {
                     ForEach(AIProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
                 .pickerStyle(.menu)
                 .onChange(of: viewModel.selectedProvider) { _, newValue in
+                    // Skip when the change came from importConversation —
+                    // otherwise selectProvider would clobber the imported modelID.
+                    guard !viewModel.isImportingConversation else { return }
                     Task {
                         await viewModel.selectProvider(newValue)
                     }
@@ -305,9 +374,7 @@ struct SingleConfigurationSection: View {
 
                 TextField("System Instructions (optional)", text: $viewModel.systemInstruction, axis: .vertical)
                     .lineLimit(2...5)
-            }
         }
-        .groupBoxStyle(ThemeGroupBoxStyle())
     }
 
     private var apiKeyBinding: Binding<String> {
@@ -327,50 +394,26 @@ struct SingleConfigurationSection: View {
 
 struct SingleMessagesSection: View {
     @ObservedObject var viewModel: PlaygroundViewModel
+    var onScroll: (() -> Void)? = nil
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(viewModel.messages) { message in
-                        MessageBubbleView(message: message)
-                            .id(message.id)
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            ConversationView(
+                messages: viewModel.messages,
+                streamingText: viewModel.isLoading ? viewModel.streamingText : nil,
+                onScroll: onScroll
+            )
 
-                    if viewModel.isLoading {
-                        if viewModel.streamingText.isEmpty {
-                            HStack {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 16, height: 16)
-                                Text("Thinking...")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .id("loading-indicator")
-                        } else {
-                            StreamingBubbleView(text: viewModel.streamingText)
-                                .id("streaming-bubble")
-                        }
-                    }
+            if viewModel.isLoading && viewModel.streamingText.isEmpty {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 16, height: 16)
+                    Text("Thinking...")
+                        .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
             }
-            .onChange(of: viewModel.messages.count) {
-                if let last = viewModel.messages.last?.id {
-                    withAnimation {
-                        proxy.scrollTo(last, anchor: .bottom)
-                    }
-                }
-            }
-            .onChange(of: viewModel.isLoading) { _, isLoading in
-                if isLoading {
-                    proxy.scrollTo("loading-indicator", anchor: .bottom)
-                }
-            }
-            .onChange(of: viewModel.streamingText) {
-                proxy.scrollTo("streaming-bubble", anchor: .bottom)
-            }
-            .textSelection(.enabled)
         }
     }
 }
@@ -547,6 +590,7 @@ struct CompareWorkspaceView: View {
                             onSelectModel: { compareViewModel.selectModel($0, for: provider) },
                             onToggleProviderEnabled: { compareViewModel.setProviderEnabled(provider, $0) },
                             onRefreshModels: { Task { await compareViewModel.refreshModels(for: provider) } },
+                            onRetryRun: { runID in compareViewModel.retryProvider(runID: runID, provider: provider) },
                             onToggleExpand: {
                                 isAnimating = true
                                 withAnimation(.easeOut(duration: animationDuration)) {
@@ -579,6 +623,7 @@ struct CompareProviderColumnView: View {
     let onSelectModel: (String) -> Void
     let onToggleProviderEnabled: (Bool) -> Void
     let onRefreshModels: () -> Void
+    let onRetryRun: (UUID) -> Void
     var onToggleExpand: () -> Void = {}
 
     var body: some View {
